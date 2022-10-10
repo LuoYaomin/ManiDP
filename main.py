@@ -22,6 +22,7 @@ import torchvision.datasets as dset
 import torchvision.transforms as transforms
 import time
 import math
+import torch.optim.lr_scheduler as lr_scheduler
 
 from torch.nn import init
 import numpy as np
@@ -39,8 +40,8 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-parser = argparse.ArgumentParser(description='Training on CIFAR or ImageNet',formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument('--data_path', type=str, default='./cifar10/',help='Path to dataset')
+parser = argparse.ArgumentParser(description='Training on CIFAR or ImageNet', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument('--data_path', type=str, default='./cifar10/', help='Path to dataset')
 parser.add_argument('--dataset', type=str,default='cifar10', choices=['cifar10', 'imagenet'],
                     help='Choose between Cifar10/100 and ImageNet.')
 parser.add_argument('--arch', metavar='ARCH', default='resnet18')
@@ -49,22 +50,23 @@ parser.add_argument('--batch_size', type=int, default=128, help='Batch size.')
 parser.add_argument('--momentum', type=float, default=0.9, help='Momentum.')
 parser.add_argument('--decay', type=float, default=0.0005, help='Weight decay (L2 penalty).')
 parser.add_argument('--decay_branch', type=float, default=0.0, help='Weight decay (L2 penalty).')
-parser.add_argument('--print_freq', default=200, type=int, metavar='N', help='print frequency (default: 200)')
-parser.add_argument('--save_path', type=str, default='/cache/dypruning_results/', help='Folder to save checkpoints and log.')
+parser.add_argument('--print_freq', default=100, type=int, metavar='N', help='print frequency (default: 200)')
+parser.add_argument('--save_path', type=str, default='./dypruning_results/', help='Folder to save checkpoints and log.')
 parser.add_argument('--pretrain_path', default='/cache/pretrain_path/dynamic_pruning/', type=str, help='..path of pre-trained model')
-parser.add_argument('--workers', type=int, default=0, help='number of data loading workers (default: 2)')
+parser.add_argument('--workers', type=int, default=16, help='number of data loading workers (default: 2)')
 parser.add_argument('--manualSeed', type=int, default=1, help='manual seed')
 parser.add_argument('--squeeze_rate', type=int, default=2)
-parser.add_argument('--thre_freq', type=int, default=1)
-parser.add_argument('--epochs', type=int, default=400, help='Number of epochs to train.')
-parser.add_argument('--lr', type=float, default=0.05, help='The Learning Rate.') 
+parser.add_argument('--thre_freq', type=int, default=50)
+parser.add_argument('--epochs', type=int, default=1000, help='Number of epochs to train.')
+parser.add_argument('--lr', type=float, default=0.001, help='The Learning Rate.')
 parser.add_argument('--thre_init', type=float, default=-10000.0)
 parser.add_argument('--thre_cls', type=float, default=0.5)
 parser.add_argument('--gamma', type=float, default=1.0)
 parser.add_argument('--clamp_max', type=float, default=1000.0)
-parser.add_argument('--lambda_lasso', type=float, default=0, help='group lasso loss weight')
-parser.add_argument('--lambda_graph', type=float, default=0)
+parser.add_argument('--lambda_lasso', type=float, default=0.1, help='group lasso loss weight')
+parser.add_argument('--lambda_graph', type=float, default=10)
 parser.add_argument('--target_remain_rate', type=float, default=0.65)
+parser.add_argument('--weight_decay', default=0.0005, type=float)
 
 args, unparsed = parser.parse_known_args()
 
@@ -76,7 +78,7 @@ random.seed(args.manualSeed)
 torch.manual_seed(args.manualSeed)
 if args.use_cuda:
     torch.cuda.manual_seed_all(args.manualSeed)
-cudnn.benchmark = True
+cudnn.benchmark = False
 torch.backends.cudnn.deterministic = True
 
 if args.dataset == 'imagenet':
@@ -153,56 +155,14 @@ test_loader = torch.utils.data.DataLoader(test_data, batch_size=args.batch_size,
 
 print("=> creating model '{}'".format(args.arch))
 net = resnet_imagenet.resnet18(args=args)
-
-# if args.dataset == 'imagenet':
-#     if args.arch == 'resnet34':
-#         net = resnet_imagenet.resnet34(args=args)
-#     elif args.arch == 'resnet18':
-#         net = resnet_imagenet.resnet18(args=args)
-# else:
-#     if args.arch == 'dyresnet20':
-#         net = resnet_cifar.resnet20(num_classes=num_classes, args=args)
-#
-#     elif args.arch == 'dyresnet32':
-#         net = resnet_cifar.resnet32(num_classes=num_classes, args=args)
-#
-#     elif args.arch == 'dyresnet56':
-#         net = resnet_cifar.resnet56(num_classes=num_classes, args=args)
-
-# if args.dataset == 'imagenet':
-#
-#     if args.arch == 'resnet34':
-#         state_dict = torch.load(os.path.join(args.pretrain_path, 'resnet34-333f7ec4.pth'))
-#     elif args.arch == 'resnet18':
-#         state_dict = torch.load(os.path.join(args.pretrain_path, 'resnet18-5c106cde.pth'))
-#
-#     from collections import OrderedDict
-#     new_state_dict = OrderedDict()
-#
-#     for k, v in state_dict.items():
-#         if k == 'conv1.weight':
-#             new_state_dict['conv1_7x7.weight'] = v
-#         else:
-#             new_state_dict[k] = v
-#
-#     net.load_state_dict(new_state_dict, strict=False)
     
 net = torch.nn.DataParallel(net, device_ids=list(range(args.ngpu))).cuda()
-
 print(net)
-# if args.dataset=='cifar10':
-#     if args.arch=='dyresnet20':
-#         pretrain_dict = torch.load(os.path.join(args.pretrain_path,'cifar_pretrained_nets/','ck_resnet20_cifar10.pth'))
-#     elif args.arch=='dyresnet32':
-#         pretrain_dict = torch.load(os.path.join(args.pretrain_path,'cifar_pretrained_nets/','ck_resnet32_cifar10.pth'))
-#     elif args.arch=='dyresnet56':
-#         pretrain_dict = torch.load(os.path.join(args.pretrain_path,'cifar_pretrained_nets/','ck_resnet56_cifar10.pth'))
-#     key_list=list(pretrain_dict.keys())
-#     for key in key_list:
-#         if 'mb' in key:
-#             del pretrain_dict[key]
-#
-#     net.load_state_dict(pretrain_dict, strict=False)
+
+# if args.pretrain_path:
+#     pretrain_dict = torch.load(os.path.join(args.pretrain_path, 'model_best.pth'))
+
+# net.load_state_dict(pretrain_dict, strict=False)
 
 criterion = torch.nn.CrossEntropyLoss()
 
@@ -397,7 +357,7 @@ def validate_ontrain(val_loader, model, criterion, log):
         # compute output
         with torch.no_grad():
             output, _, _, _, _ = model(input_var)
-            #loss = criterion(output, target_var)
+            #loss = criterion(output, target_var)jing
             # 此处reduction = none，直接输出N个样本的loss
             loss_ce = F.cross_entropy(output, target_var, reduction='none')
             loss_ce_list.append(loss_ce.data.cpu())
@@ -432,6 +392,7 @@ def adjust_learning_rate(optimizer, epoch, args, batch=None, nBatch=None, total_
 def adjust_remain_rate(epoch, total_epochs, target_remain_rate):
     remain_rate_init = 1.0
     remain_rate_last = target_remain_rate
+    # cos曲线，remain_rate->[target_rate, 1]
     remain_rate=(remain_rate_init-remain_rate_last)/2.0*math.cos(math.pi * (epoch+1) / total_epochs)+(remain_rate_init + remain_rate_last)/2.0
 
     return remain_rate
@@ -459,7 +420,9 @@ for nam, parm in net.named_parameters():
 
 optimizer = torch.optim.SGD([{'params': params_main, 'weight_decay': args.decay},
                             {'params': params_branch, 'weight_decay': args.decay_branch}],
-                            args.lr, momentum=args.momentum,  nesterov=True)
+                            args.lr, momentum=args.momentum,  nesterov=True, weight_decay=args.weight_decay)
+
+# scheduler = lr_scheduler.CosineAnnealingLR(optimizer, args.epochs, eta_min=1e-10)
 
 start_time = time.time()
 epoch_time = AverageMeter()  
@@ -491,12 +454,15 @@ for epoch in range(0, args.epochs):
     val_acc_1, val_acc_5, val_los_1 = validate(test_loader, net, criterion, log)
     
     if epoch % args.thre_freq == 0 and epoch >= 1:
+        # 返回每个channel saliencies 的均值（50000个样本的均值）
         num_data = float(len(train_loader.dataset)) / args.ngpu
+        # 按照修剪比例返回每个instance保留的k个里面最小的channel saliencies
+        # torch.topk 返回 values, indices，torch.topk()[0][-1]返回values里面最小的一个，这也就是这个instance所有channel的阈值
         mask_mean_list = [mblock.mask_sum/num_data for mblock in maskblock_list]
         threshold_list = [torch.topk(mask_mean_list[imodule],
                                      k=math.ceil(remain_rate*len(mask_mean_list[imodule])),
                                      sorted=True)[0][-1] for imodule in range(len(mask_mean_list))]
-                
+
         imask = 0
         for module in net.modules():
             if isinstance(module, MaskBlock):
