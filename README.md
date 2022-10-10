@@ -1,3 +1,3 @@
 # ManiDP
-在作者源代码中稍作修改，如针对cifar10数据集对resnet18结构进行微调
 添加大量注释，方便阅读理解
+models文件夹中resnet_imagenet被我实际修改成了cifar10，为了使resnet18和cifar10相适应，对resnet18网络结构做了微调
