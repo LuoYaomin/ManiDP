@@ -1,3 +1,3 @@
 # ManiDP
-添加大量注释，方便阅读理解
+添加大量注释，方便阅读理解 \
 models文件夹中resnet_imagenet被我实际修改成了cifar10，为了使resnet18和cifar10相适应，对resnet18网络结构做了微调
