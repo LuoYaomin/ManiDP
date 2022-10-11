@@ -239,7 +239,7 @@ def train(train_loader, model, criterion, optimizer, epoch, log,
         loss_lasso = 0.0
         # train_los_pre为前一个batch_size训练的损失平均值
         train_los_pre = train_los_pre.mean().to(loss_ce.device)
-        # w1为论文公式4中𝛽，args.thre_cls * train_los_pre为if条件中的C，是instance Complexity的度量
+        # w1为论文公式4中𝛽，args.thre_cls * train_los_pre为if条件中的C，是instance Complexity的阈值
         # 当样本loss小于复杂度阈值C时，则进行计算稀疏处理
         w1 = (loss_ce < args.thre_cls * train_los_pre).float()
         # 此处为论文中的公式4中系数部分的具体实现，当前损失越小，则w2越大，稀疏程度越大
