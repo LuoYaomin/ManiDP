@@ -189,7 +189,6 @@ def cal_similarity_loss(f_s, f_t):
     G_t = torch.mm(f_t, torch.t(f_t))
 
     # 论文公式10，使用F范数将T和R结合，源码此处将F范数中的开方修改成了 / bsz * bsz
-    # 个人疑问，这里为什么用减法，这两个矩阵之间似乎没有必然联系。比较二者差别然后取范数作为loss是否合适？
     G_diff = G_t - G_s 
     loss = (G_diff * G_diff).view(-1, 1).sum(0) / (bsz * bsz)
     
@@ -241,6 +240,7 @@ def train(train_loader, model, criterion, optimizer, epoch, log,
         train_los_pre = train_los_pre.mean().to(loss_ce.device)
         # w1为论文公式4中𝛽，args.thre_cls * train_los_pre为if条件中的C，是instance Complexity的阈值
         # 当样本loss小于复杂度阈值C时，则进行计算稀疏处理
+        # 个人疑问：用上个epoch的Loss乘以thre_cls作为阈值，是否合适？刚开始训练时候前几个epoch的loss用作阈值会不会给训练带来误导？
         w1 = (loss_ce < args.thre_cls * train_los_pre).float()
         # 此处为论文中的公式4中系数部分的具体实现，当前损失越小，则w2越大，稀疏程度越大
         # w2.size = batch_size，pow(gamma)似乎在论文公式中没有提到
@@ -254,7 +254,7 @@ def train(train_loader, model, criterion, optimizer, epoch, log,
         loss_lasso_record.update(loss_lasso.data.item(), input.size(0))
 
         loss_ce_list.append(loss_ce.data.cpu())
-        # lambda用于平衡识别准确率和网络稀疏性
+        # lambda用于平衡识别准确率和网络复杂度
         loss = loss_ce.mean() + lambda_lasso * loss_lasso
 
         graph_loss = 0.0
